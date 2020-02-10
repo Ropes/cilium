@@ -289,24 +289,35 @@ var _ = Describe("K8sServicesTest", func() {
 	Context("Checks service across nodes", func() {
 
 		var (
-			demoYAML string
+			demoYAML   string
+			testDSIPv6 string
 		)
 
 		BeforeAll(func() {
 			demoYAML = helpers.ManifestGet(kubectl.BasePath(), "demo_ds.yaml")
 			res := kubectl.ApplyDefault(demoYAML)
 			res.ExpectSuccess("Unable to apply %s", demoYAML)
+			waitPodsDs()
+
+			// testds-service
+			testDSIPv6 = "fd03::310"
+			httpBackends := ciliumIPv6Backends("-l k8s:zgroup=testDS", "80")
+			ciliumAddService(31080, net.JoinHostPort(testDSIPv6, "80"), httpBackends, "ClusterIP", "Cluster")
+			tftpBackends := ciliumIPv6Backends("-l k8s:zgroup=testDS", "69")
+			ciliumAddService(31069, net.JoinHostPort(testDSIPv6, "69"), tftpBackends, "ClusterIP", "Cluster")
 		})
 
 		AfterAll(func() {
 			// Explicitly ignore result of deletion of resources to avoid incomplete
 			// teardown if any step fails.
+			ciliumDelService(31080)
+			ciliumDelService(31069)
+
 			_ = kubectl.Delete(demoYAML)
 			ExpectAllPodsTerminated(kubectl)
 		})
 
 		It("Checks ClusterIP Connectivity", func() {
-			waitPodsDs()
 			service := "testds-service"
 
 			clusterIP, _, err := kubectl.GetServiceHostPort(helpers.DefaultNamespace, service)
@@ -317,6 +328,12 @@ var _ = Describe("K8sServicesTest", func() {
 			testCurlRequest(testDSClient, url)
 
 			url = fmt.Sprintf("tftp://%s/hello", clusterIP)
+			testCurlRequest(testDSClient, url)
+
+			url = fmt.Sprintf(`"http://[%s]/"`, testDSIPv6)
+			testCurlRequest(testDSClient, url)
+
+			url = fmt.Sprintf(`"tftp://[%s]/hello"`, testDSIPv6)
 			testCurlRequest(testDSClient, url)
 		})
 
