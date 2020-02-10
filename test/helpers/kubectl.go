@@ -40,6 +40,7 @@ import (
 
 	"github.com/asaskevich/govalidator"
 	"github.com/sirupsen/logrus"
+	"github.com/vishvananda/netlink"
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -593,8 +594,12 @@ func (kub *Kubectl) GetNodeNameByLabelContext(ctx context.Context, label string)
 
 // GetNodeIPByLabel returns the IP of the node with cilium.io/ci-node=label.
 // An error is returned if a node cannot be found.
-func (kub *Kubectl) GetNodeIPByLabel(label string) (string, error) {
-	filter := `{@.items[*].status.addresses[?(@.type == "InternalIP")].address}`
+func (kub *Kubectl) GetNodeIPByLabel(label string, external bool) (string, error) {
+	ipType := "InternalIP"
+	if external {
+		ipType = "ExternalIP"
+	}
+	filter := `{@.items[*].status.addresses[?(@.type == "` + ipType + `")].address}`
 	res := kub.ExecShort(fmt.Sprintf("%s get nodes -l cilium.io/ci-node=%s -o jsonpath='%s'",
 		KubectlCmd, label, filter))
 	if !res.WasSuccessful() {
@@ -1356,14 +1361,19 @@ func (kub *Kubectl) generateCiliumYaml(options map[string]string, filename strin
 	}
 
 	if !RunsWithKubeProxy() {
-		nodeIP, err := kub.GetNodeIPByLabel(K8s1)
+		nodeIP, err := kub.GetNodeIPByLabel(K8s1, false)
 		if err != nil {
 			return fmt.Errorf("Cannot retrieve Node IP for k8s1: %s", err)
 		}
 
+		privateIface, err := kub.GetPrivateIface()
+		if err != nil {
+			return err
+		}
+
 		opts := map[string]string{
 			"global.kubeProxyReplacement": "strict",
-			"global.nodePort.device":      PrivateIface,
+			"global.nodePort.device":      privateIface,
 			"global.k8sServiceHost":       nodeIP,
 			"global.k8sServicePort":       "6443",
 		}
@@ -1411,6 +1421,30 @@ func (kub *Kubectl) ciliumInstallHelm(filename string, options map[string]string
 	}
 
 	return nil
+}
+
+// GetPrivateIface returns an interface name of a netdev which has InternalIP
+// addr.
+// Assumes that all nodes have identical interfaces.
+func (kub *Kubectl) GetPrivateIface() (string, error) {
+	ipAddr, err := kub.GetNodeIPByLabel(K8s1, false)
+	if err != nil {
+		return "", err
+	}
+
+	return getLinkNameByAddr(ipAddr)
+}
+
+// GetPrivateIface returns an interface name of a netdev which has ExternalIP
+// addr.
+// Assumes that all nodes have identical interfaces.
+func (kub *Kubectl) GetPublicIface() (string, error) {
+	ipAddr, err := kub.GetNodeIPByLabel(K8s1, true)
+	if err != nil {
+		return "", err
+	}
+
+	return getLinkNameByAddr(ipAddr)
 }
 
 func (kub *Kubectl) DeleteCiliumDS() error {
@@ -3098,4 +3132,19 @@ func logGathererSelector(allNodes bool) string {
 	}
 
 	return selector
+}
+
+func getLinkNameByAddr(ipAddr string) (string, error) {
+	addrs, err := netlink.AddrList(nil, netlink.FAMILY_ALL)
+	if err != nil {
+		return "", err
+	}
+
+	for _, addr := range addrs {
+		if addr.IP.String() == ipAddr {
+			return addr.Label, nil
+		}
+	}
+
+	return "", nil
 }
