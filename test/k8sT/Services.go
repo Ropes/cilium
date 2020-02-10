@@ -589,10 +589,7 @@ var _ = Describe("K8sServicesTest", func() {
 
 				Context("Tests with vxlan", func() {
 					BeforeAll(func() {
-						DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, map[string]string{
-							"global.nodePort.enabled": "true",
-							"global.nodePort.device":  nativeDev,
-						})
+						DeployCiliumAndDNS(kubectl, ciliumFilename)
 					})
 
 					It("Tests NodePort", func() {
@@ -611,8 +608,6 @@ var _ = Describe("K8sServicesTest", func() {
 				Context("Tests with direct routing", func() {
 					BeforeAll(func() {
 						DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, map[string]string{
-							"global.nodePort.enabled":     "true",
-							"global.nodePort.device":      nativeDev,
 							"global.tunnel":               "disabled",
 							"global.autoDirectNodeRoutes": "true",
 						})
@@ -658,8 +653,6 @@ var _ = Describe("K8sServicesTest", func() {
 
 				SkipItIf(helpers.DoesNotExistNodeWithoutCilium, "Tests with direct routing and DSR", func() {
 					DeployCiliumOptionsAndDNS(kubectl, ciliumFilename, map[string]string{
-						"global.nodePort.enabled":     "true",
-						"global.nodePort.device":      nativeDev,
 						"global.nodePort.mode":        "dsr",
 						"global.tunnel":               "disabled",
 						"global.autoDirectNodeRoutes": "true",
